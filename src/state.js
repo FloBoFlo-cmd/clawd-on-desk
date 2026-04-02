@@ -243,6 +243,10 @@ function applyState(state, svgOverride) {
   }
 
   ctx.sendToRenderer("state-change", state, svg);
+  if (state === "attention") ctx.sendToRenderer("play-confetti");
+  if (contextHealth.percent !== null && contextHealth.percent >= 75) {
+    ctx.sendToRenderer("context-shake", contextHealth.level || "WARNING");
+  }
   if (ctx.onApplyState) ctx.onApplyState(state);
   ctx.syncHitWin();
   ctx.sendToHitWin("hit-state-sync", { currentSvg: svg });
@@ -349,6 +353,8 @@ function updateSession(sessionId, state, event, sourcePid, cwd, editor, pidChain
     startupRecoveryActive = false;
     if (startupRecoveryTimer) { clearTimeout(startupRecoveryTimer); startupRecoveryTimer = null; }
   }
+
+  if (ctx.onTrackActivity) ctx.onTrackActivity(event, state);
 
   if (event === "PermissionRequest") {
     setState("notification");

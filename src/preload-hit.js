@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("hitAPI", {
   dragLock: (locked) => ipcRenderer.send("drag-lock", locked),
   moveWindowBy: (dx, dy) => ipcRenderer.send("move-window-by", dx, dy),
   dragEnd: () => ipcRenderer.send("drag-end"),
+  sendDragEndVelocity: (vel) => ipcRenderer.send("drag-end-velocity", vel),
   showContextMenu: () => ipcRenderer.send("show-context-menu"),
   focusTerminal: () => ipcRenderer.send("focus-terminal"),
   exitMiniMode: () => ipcRenderer.send("exit-mini-mode"),

@@ -1,4 +1,4 @@
-// sounds.js v1.0.0 | lifecycle: active | 2026-04
+// sounds.js v1.1.0 | lifecycle: active | 2026-04
 // Sound effect manager for Clawd on Desk.
 // Triggers synthesized sounds via IPC to the renderer's Web Audio API.
 // No external audio files needed — all sounds are programmatically generated.
@@ -20,6 +20,8 @@ const SILENT_STATES = new Set(["idle", "working", "dozing", "collapsing", "wakin
 
 module.exports = function initSounds(ctx) {
 
+  let ambientActive = false;
+
   function playForState(state) {
     if (!ctx.soundEnabled) return;
     if (SILENT_STATES.has(state)) return;
@@ -31,5 +33,23 @@ module.exports = function initSounds(ctx) {
     ctx.sendToRenderer("play-sound", sound);
   }
 
-  return { playForState, SOUND_MAP };
+  function ambientForState(state) {
+    const shouldPlay = state === "working" && ctx.ambientEnabled && !ctx.doNotDisturb;
+    if (shouldPlay && !ambientActive) {
+      ambientActive = true;
+      ctx.sendToRenderer("start-ambient");
+    } else if (!shouldPlay && ambientActive) {
+      ambientActive = false;
+      ctx.sendToRenderer("stop-ambient");
+    }
+  }
+
+  function stopAmbient() {
+    if (ambientActive) {
+      ambientActive = false;
+      ctx.sendToRenderer("stop-ambient");
+    }
+  }
+
+  return { playForState, ambientForState, stopAmbient, SOUND_MAP };
 };

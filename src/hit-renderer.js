@@ -27,6 +27,10 @@ let pendingDx = 0, pendingDy = 0;
 let dragRAF = null;
 const DRAG_THRESHOLD = 3;
 
+// --- Velocity tracking for momentum physics ---
+const VELOCITY_SAMPLES = 3;
+let dragSamples = [];  // { x, y, t } — last N screen positions with timestamps
+
 // --- Reaction state (tracked here to gate input) ---
 let isReacting = false;
 let isDragReacting = false;
@@ -51,6 +55,7 @@ area.addEventListener("pointerdown", (e) => {
     mouseDownY = e.clientY;
     pendingDx = 0;
     pendingDy = 0;
+    dragSamples = [{ x: e.screenX, y: e.screenY, t: performance.now() }];
     window.hitAPI.dragLock(true);
     area.classList.add("dragging");
   }
@@ -62,6 +67,10 @@ document.addEventListener("pointermove", (e) => {
     pendingDy += e.screenY - lastScreenY;
     lastScreenX = e.screenX;
     lastScreenY = e.screenY;
+
+    // Record position sample for velocity calculation
+    dragSamples.push({ x: e.screenX, y: e.screenY, t: performance.now() });
+    if (dragSamples.length > VELOCITY_SAMPLES) dragSamples.shift();
 
     if (!didDrag) {
       const totalDx = e.clientX - mouseDownX;
@@ -86,7 +95,6 @@ document.addEventListener("pointermove", (e) => {
 function stopDrag() {
   if (!isDragging) return;
   isDragging = false;
-  window.hitAPI.dragLock(false);
   area.classList.remove("dragging");
   if (pendingDx !== 0 || pendingDy !== 0) {
     if (dragRAF) { clearTimeout(dragRAF); dragRAF = null; }
@@ -94,7 +102,32 @@ function stopDrag() {
     pendingDx = 0; pendingDy = 0;
   }
   if (didDrag) {
+    // Calculate velocity from recent samples
+    const now = performance.now();
+    dragSamples.push({ x: lastScreenX, y: lastScreenY, t: now });
+    if (dragSamples.length >= 2) {
+      const oldest = dragSamples[0];
+      const newest = dragSamples[dragSamples.length - 1];
+      const dt = newest.t - oldest.t;
+      if (dt > 0 && dt < 200) {  // Only if samples are recent enough (<200ms)
+        const FRAME_MS = 16;
+        let vx = ((newest.x - oldest.x) / dt) * FRAME_MS;
+        let vy = ((newest.y - oldest.y) / dt) * FRAME_MS;
+        const speed = Math.sqrt(vx * vx + vy * vy);
+        if (speed > 1.5) {  // Minimum velocity threshold to trigger momentum
+          // Keep dragLock active — physics loop in main.js will unlock
+          window.hitAPI.sendDragEndVelocity({ vx, vy });
+          window.hitAPI.dragEnd();
+          endDragReaction();
+          return;
+        }
+      }
+    }
+    // No significant velocity — normal drag end
+    window.hitAPI.dragLock(false);
     window.hitAPI.dragEnd();
+  } else {
+    window.hitAPI.dragLock(false);
   }
   endDragReaction();
 }

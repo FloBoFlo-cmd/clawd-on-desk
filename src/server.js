@@ -196,7 +196,58 @@ function startHttpServer() {
       });
     } else if (req.method === "GET" && req.url === "/stats") {
       const stats = ctx.getStats ? ctx.getStats() : { error: "stats not available" };
+      if (ctx.getActivity) stats.activity = ctx.getActivity();
+      if (ctx.getActiveApp) stats.activeApp = ctx.getActiveApp();
+      if (ctx.getAchievementStats) stats.achievements = ctx.getAchievementStats();
+      if (ctx.getPomodoroStatus) stats.pomodoro = ctx.getPomodoroStatus();
       const body = JSON.stringify(stats);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,
+      });
+      res.end(body);
+    } else if (req.method === "GET" && req.url === "/health") {
+      const health = ctx.getHealthStatus ? ctx.getHealthStatus() : { ok: true };
+      const body = JSON.stringify(health);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,
+      });
+      res.end(body);
+    } else if (req.method === "GET" && req.url === "/features") {
+      const features = ctx.getFeatures ? ctx.getFeatures() : [];
+      const body = JSON.stringify(features);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,
+      });
+      res.end(body);
+    } else if (req.method === "POST" && req.url?.startsWith("/features/") && req.url?.endsWith("/toggle")) {
+      const featureId = req.url.split("/")[2];
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          const result = ctx.toggleFeature ? ctx.toggleFeature(featureId, data.enabled) : { ok: false };
+          res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+          res.end(JSON.stringify(result));
+        } catch {
+          res.writeHead(400);
+          res.end("bad json");
+        }
+      });
+    } else if (req.method === "GET" && req.url === "/knowledge") {
+      const knowledge = ctx.getKnowledge ? ctx.getKnowledge() : {};
+      const body = JSON.stringify(knowledge);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,
+      });
+      res.end(body);
+    } else if (req.method === "GET" && req.url === "/achievements") {
+      const achievements = ctx.getAchievements ? ctx.getAchievements() : [];
+      const body = JSON.stringify(achievements);
       res.writeHead(200, {
         "Content-Type": "application/json",
         [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,

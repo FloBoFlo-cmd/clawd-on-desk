@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onMiniModeChange: (cb) => ipcRenderer.on("mini-mode-change", (_, enabled, edge) => cb(enabled, edge)),
   // Sound effects
   onPlaySound: (cb) => ipcRenderer.on("play-sound", (_, sound) => cb(sound)),
+  // Ambient sound
+  onStartAmbient: (cb) => ipcRenderer.on("start-ambient", () => cb()),
+  onStopAmbient: (cb) => ipcRenderer.on("stop-ambient", () => cb()),
+  // Confetti effect
+  onPlayConfetti: (cb) => ipcRenderer.on("play-confetti", () => cb()),
+  // Context shake
+  onContextShake: (cb) => ipcRenderer.on("context-shake", (_, level) => cb(level)),
   // Reaction control (from main, relayed from hit window)
   onStartDragReaction: (cb) => ipcRenderer.on("start-drag-reaction", () => cb()),
   onEndDragReaction: (cb) => ipcRenderer.on("end-drag-reaction", () => cb()),

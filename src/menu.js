@@ -99,9 +99,17 @@ const i18n = {
     sessionHrAgo: "{n}h ago",
     telegramNotify: "Telegram Notifications",
     soundEffects: "Sound Effects",
+    ambientSound: "Ambient Sound",
+    speechBubbles: "Speech Bubbles",
+    chatBubbles: "Chat Bubbles",
     showPet: "Show Clawd",
     hidePet: "Hide Clawd",
     toggleShortcut: "Toggle Shortcut: {shortcut}",
+    pomodoroStart: "Pomodoro Start",
+    pomodoroStop: "Pomodoro Stop",
+    pomodoroFocus: "Focus: {min}m left",
+    pomodoroBreak: "Break: {min}m left",
+    dashboard: "Dashboard",
     quit: "Quit",
   },
   zh: {
@@ -149,9 +157,17 @@ const i18n = {
     sessionHrAgo: "{n}小时前",
     telegramNotify: "Telegram 通知",
     soundEffects: "音效",
+    ambientSound: "环境音",
+    speechBubbles: "语音气泡",
+    chatBubbles: "聊天气泡",
     showPet: "显示 Clawd",
     hidePet: "隐藏 Clawd",
     toggleShortcut: "切换快捷键: {shortcut}",
+    pomodoroStart: "番茄钟开始",
+    pomodoroStop: "番茄钟停止",
+    pomodoroFocus: "专注: 剩余{min}分钟",
+    pomodoroBreak: "休息: 剩余{min}分钟",
+    dashboard: "仪表盘",
     quit: "退出",
   },
 };
@@ -220,6 +236,21 @@ module.exports = function initMenu(ctx) {
     ctx.savePrefs();
   }
 
+  function pomodoroMenuItems() {
+    const status = ctx.getPomodoroStatus ? ctx.getPomodoroStatus() : { phase: "idle", remaining: 0, count: 0 };
+    if (status.phase === "idle") {
+      return [{ label: t("pomodoroStart"), click: () => { if (ctx.pomodoroStart) ctx.pomodoroStart(); } }];
+    }
+    const minLeft = Math.ceil(status.remaining / 60000);
+    const statusLabel = status.phase === "focus"
+      ? t("pomodoroFocus").replace("{min}", minLeft)
+      : t("pomodoroBreak").replace("{min}", minLeft);
+    return [
+      { label: statusLabel, enabled: false },
+      { label: t("pomodoroStop"), click: () => { if (ctx.pomodoroStop) ctx.pomodoroStop(); } },
+    ];
+  }
+
   function buildTrayMenu() {
     if (!ctx.tray) return;
     const items = [
@@ -227,6 +258,9 @@ module.exports = function initMenu(ctx) {
         label: ctx.doNotDisturb ? t("wake") : t("sleep"),
         click: () => ctx.doNotDisturb ? ctx.disableDoNotDisturb() : ctx.enableDoNotDisturb(),
       },
+      ...pomodoroMenuItems(),
+      { label: t("dashboard"), click: () => ctx.showDashboard() },
+      { type: "separator" },
       {
         label: t("bubbleFollow"),
         type: "checkbox",
@@ -279,6 +313,40 @@ module.exports = function initMenu(ctx) {
         checked: ctx.soundEnabled,
         click: (menuItem) => {
           ctx.soundEnabled = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("ambientSound"),
+        type: "checkbox",
+        checked: ctx.ambientEnabled,
+        click: (menuItem) => {
+          ctx.ambientEnabled = menuItem.checked;
+          ctx.onAmbientToggle();
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("speechBubbles"),
+        type: "checkbox",
+        checked: ctx.speechEnabled,
+        click: (menuItem) => {
+          ctx.speechEnabled = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("chatBubbles"),
+        type: "checkbox",
+        checked: ctx.chatEnabled,
+        click: (menuItem) => {
+          ctx.chatEnabled = menuItem.checked;
           buildContextMenu();
           buildTrayMenu();
           ctx.savePrefs();
@@ -466,6 +534,7 @@ module.exports = function initMenu(ctx) {
         label: ctx.doNotDisturb ? t("wake") : t("sleep"),
         click: () => ctx.doNotDisturb ? ctx.disableDoNotDisturb() : ctx.enableDoNotDisturb(),
       },
+      ...pomodoroMenuItems(),
       {
         label: t("hideBubbles"),
         type: "checkbox",
@@ -499,7 +568,42 @@ module.exports = function initMenu(ctx) {
           ctx.savePrefs();
         },
       },
+      {
+        label: t("ambientSound"),
+        type: "checkbox",
+        checked: ctx.ambientEnabled,
+        click: (menuItem) => {
+          ctx.ambientEnabled = menuItem.checked;
+          ctx.onAmbientToggle();
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("speechBubbles"),
+        type: "checkbox",
+        checked: ctx.speechEnabled,
+        click: (menuItem) => {
+          ctx.speechEnabled = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("chatBubbles"),
+        type: "checkbox",
+        checked: ctx.chatEnabled,
+        click: (menuItem) => {
+          ctx.chatEnabled = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
       { type: "separator" },
+      { label: t("dashboard"), click: () => ctx.showDashboard() },
       {
         label: `${t("sessions")} (${ctx.sessions.size})`,
         submenu: ctx.buildSessionSubmenu(),

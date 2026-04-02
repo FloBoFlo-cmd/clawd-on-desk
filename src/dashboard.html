@@ -1,0 +1,388 @@
+<!-- dashboard.html v1.0.0 | lifecycle: active | 2026-04 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clawd Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1e1e1e;
+    color: #e0e0e0;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Title bar */
+  .titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding: 0 10px;
+    background: #161616;
+    -webkit-app-region: drag;
+    border-bottom: 1px solid #333;
+  }
+  .titlebar-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #aaa;
+    letter-spacing: 0.5px;
+  }
+  .titlebar-close {
+    -webkit-app-region: no-drag;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: #888;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+  .titlebar-close:hover { background: #c44; color: #fff; }
+
+  /* Content area */
+  .content {
+    padding: 10px 12px;
+    overflow-y: auto;
+    height: calc(100vh - 32px);
+  }
+  .content::-webkit-scrollbar { width: 4px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+  /* Stats summary */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .stat-card {
+    background: #252525;
+    border-radius: 6px;
+    padding: 8px 10px;
+    border: 1px solid #333;
+  }
+  .stat-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    margin-top: 2px;
+  }
+
+  /* Section header */
+  .section-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    margin-top: 8px;
+  }
+
+  /* Session cards */
+  .session-card {
+    background: #252525;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    border: 1px solid #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .session-emoji {
+    font-size: 18px;
+    flex-shrink: 0;
+    width: 24px;
+    text-align: center;
+  }
+  .session-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .session-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: #ddd;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session-meta {
+    font-size: 10px;
+    color: #888;
+    margin-top: 1px;
+  }
+  .session-state {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .state-working { background: #2d4a2d; color: #6fcf6f; }
+  .state-thinking { background: #4a4a2d; color: #cfcf6f; }
+  .state-juggling { background: #2d2d4a; color: #6f6fcf; }
+  .state-idle { background: #3a3a3a; color: #aaa; }
+  .state-sleeping { background: #2d2d2d; color: #777; }
+  .state-error { background: #4a2d2d; color: #cf6f6f; }
+  .state-notification { background: #4a3a2d; color: #cfaf6f; }
+  .state-default { background: #333; color: #aaa; }
+
+  .no-sessions {
+    text-align: center;
+    color: #666;
+    font-size: 12px;
+    padding: 16px 0;
+  }
+
+  /* Achievement bar */
+  .achievement-bar-container {
+    margin-top: 8px;
+    margin-bottom: 4px;
+  }
+  .achievement-bar-bg {
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .achievement-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6fcf6f, #4fa84f);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+  .achievement-text {
+    font-size: 10px;
+    color: #888;
+    margin-top: 3px;
+    text-align: right;
+  }
+
+  /* Pomodoro section */
+  .pomodoro-card {
+    background: #252525;
+    border-radius: 6px;
+    padding: 8px 10px;
+    border: 1px solid #333;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pomodoro-icon { font-size: 16px; }
+  .pomodoro-text { font-size: 12px; color: #ddd; }
+  .pomodoro-phase { font-weight: 600; }
+  .pomodoro-time { color: #888; font-size: 11px; }
+
+  /* Uptime */
+  .uptime-text {
+    font-size: 10px;
+    color: #555;
+    text-align: center;
+    margin-top: 10px;
+    padding-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="titlebar">
+  <span class="titlebar-text">Clawd Dashboard</span>
+  <button class="titlebar-close" id="close-btn">&times;</button>
+</div>
+
+<div class="content">
+  <!-- Stats Summary -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Sessions</div>
+      <div class="stat-value" id="stat-sessions">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tool Calls</div>
+      <div class="stat-value" id="stat-tools">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Streak</div>
+      <div class="stat-value" id="stat-streak">0d</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Errors</div>
+      <div class="stat-value" id="stat-errors">0</div>
+    </div>
+  </div>
+
+  <!-- Achievements -->
+  <div class="section-header">Achievements</div>
+  <div class="achievement-bar-container">
+    <div class="achievement-bar-bg">
+      <div class="achievement-bar-fill" id="achievement-fill" style="width: 0%"></div>
+    </div>
+    <div class="achievement-text" id="achievement-text">0 / 0</div>
+  </div>
+
+  <!-- Pomodoro -->
+  <div id="pomodoro-section" style="display: none;">
+    <div class="section-header">Pomodoro</div>
+    <div class="pomodoro-card">
+      <span class="pomodoro-icon" id="pomodoro-icon">&#x1F345;</span>
+      <div>
+        <div class="pomodoro-text">
+          <span class="pomodoro-phase" id="pomodoro-phase">Focus</span>
+        </div>
+        <div class="pomodoro-time" id="pomodoro-time">0m left</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sessions -->
+  <div class="section-header">Active Sessions</div>
+  <div id="session-list"></div>
+
+  <!-- Uptime -->
+  <div class="uptime-text" id="uptime-text">uptime: 0s</div>
+</div>
+
+<script>
+  const STATE_EMOJI = {
+    working: "\u{1F528}", thinking: "\u{1F914}", juggling: "\u{1F939}",
+    idle: "\u{1F4A4}", sleeping: "\u{1F4A4}", error: "\u{1F6A8}",
+    notification: "\u{1F514}", attention: "\u{2728}", sweeping: "\u{1F9F9}",
+    carrying: "\u{1F4E6}",
+  };
+
+  const STATE_CLASSES = {
+    working: "state-working", thinking: "state-thinking",
+    juggling: "state-juggling", idle: "state-idle",
+    sleeping: "state-sleeping", error: "state-error",
+    notification: "state-notification",
+  };
+
+  function folderName(cwd) {
+    if (!cwd) return "Local";
+    const parts = cwd.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || parts[parts.length - 2] || "Local";
+  }
+
+  function formatDuration(ms) {
+    if (!ms || ms < 0) return "just now";
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return sec + "s";
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + "m";
+    const hr = Math.floor(min / 60);
+    return hr + "h " + (min % 60) + "m";
+  }
+
+  function formatUptime(seconds) {
+    if (seconds < 60) return seconds + "s";
+    const min = Math.floor(seconds / 60);
+    if (min < 60) return min + "m";
+    const hr = Math.floor(min / 60);
+    return hr + "h " + (min % 60) + "m";
+  }
+
+  function stateClass(state) {
+    return STATE_CLASSES[state] || "state-default";
+  }
+
+  function render(data) {
+    if (!data) return;
+
+    // Stats
+    const el = (id) => document.getElementById(id);
+    el("stat-sessions").textContent = data.sessionCount || 0;
+
+    const activity = data.activity || {};
+    el("stat-tools").textContent = activity.toolCalls || 0;
+    el("stat-streak").textContent = (activity.streak || 0) + "d";
+    el("stat-errors").textContent = activity.errors || 0;
+
+    // Achievements
+    const ach = data.achievements || {};
+    const achPercent = ach.percent || 0;
+    el("achievement-fill").style.width = achPercent + "%";
+    el("achievement-text").textContent = (ach.unlocked || 0) + " / " + (ach.total || 0) + " (" + achPercent + "%)";
+
+    // Pomodoro
+    const pom = data.pomodoro || {};
+    const pomSection = el("pomodoro-section");
+    if (pom.phase && pom.phase !== "idle") {
+      pomSection.style.display = "";
+      el("pomodoro-phase").textContent = pom.phase === "focus" ? "Focus" : "Break";
+      el("pomodoro-icon").textContent = pom.phase === "focus" ? "\u{1F345}" : "\u{2615}";
+      const minLeft = Math.ceil((pom.remaining || 0) / 60000);
+      el("pomodoro-time").textContent = minLeft + "m left";
+    } else {
+      pomSection.style.display = "none";
+    }
+
+    // Sessions
+    const list = el("session-list");
+    const sessions = data.sessions || [];
+    if (sessions.length === 0) {
+      list.innerHTML = '<div class="no-sessions">No active sessions</div>';
+    } else {
+      const now = Date.now();
+      list.innerHTML = sessions.map(s => {
+        const emoji = STATE_EMOJI[s.state] || "\u{25CB}";
+        const dur = formatDuration(now - (s.startedAt || s.updatedAt || now));
+        const name = folderName(s.cwd);
+        const agent = s.agentId ? " \u00B7 " + s.agentId : "";
+        const cls = stateClass(s.state);
+        return `<div class="session-card">
+          <span class="session-emoji">${emoji}</span>
+          <div class="session-info">
+            <div class="session-name">${escHtml(name)}${escHtml(agent)}</div>
+            <div class="session-meta">${escHtml(dur)}${s.sessionId ? " \u00B7 " + escHtml(s.sessionId.slice(0, 8)) : ""}</div>
+          </div>
+          <span class="session-state ${cls}">${escHtml(s.state)}</span>
+        </div>`;
+      }).join("");
+    }
+
+    // Uptime
+    el("uptime-text").textContent = "uptime: " + formatUptime(data.uptime || 0);
+  }
+
+  function escHtml(s) {
+    if (!s) return "";
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // Close button
+  document.getElementById("close-btn").addEventListener("click", () => {
+    window.dashboardAPI.close();
+  });
+
+  // Escape key
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") window.dashboardAPI.close();
+  });
+
+  // IPC updates
+  window.dashboardAPI.onUpdate(render);
+</script>
+
+</body>
+</html>

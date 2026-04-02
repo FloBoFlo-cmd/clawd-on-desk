@@ -38,6 +38,78 @@ window.electronAPI.onPlaySound((sound) => {
   }
 });
 
+// --- Ambient noise generator (white noise → lowpass for soft "rain" sound) ---
+let ambientSource = null;
+let ambientGain = null;
+let ambientFadeTimer = null;
+
+window.electronAPI.onStartAmbient(() => {
+  try {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (ambientSource) return; // already running
+    if (ambientFadeTimer) { clearTimeout(ambientFadeTimer); ambientFadeTimer = null; }
+
+    // Generate 2 seconds of white noise buffer (looped)
+    const sampleRate = audioCtx.sampleRate;
+    const bufferSize = sampleRate * 2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+
+    // Lowpass filter for soft rain-like sound
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(800, audioCtx.currentTime);
+    filter.Q.setValueAtTime(0.7, audioCtx.currentTime);
+
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    // Fade in over 300ms
+    gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.3);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    source.start();
+
+    ambientSource = source;
+    ambientGain = gain;
+  } catch (e) {
+    // Silently ignore audio errors
+  }
+});
+
+window.electronAPI.onStopAmbient(() => {
+  try {
+    if (!ambientSource || !ambientGain || !audioCtx) return;
+    if (ambientFadeTimer) { clearTimeout(ambientFadeTimer); ambientFadeTimer = null; }
+
+    const src = ambientSource;
+    const gn = ambientGain;
+
+    // Fade out over 500ms then stop
+    gn.gain.cancelScheduledValues(audioCtx.currentTime);
+    gn.gain.setValueAtTime(gn.gain.value, audioCtx.currentTime);
+    gn.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.5);
+
+    ambientSource = null;
+    ambientGain = null;
+
+    ambientFadeTimer = setTimeout(() => {
+      ambientFadeTimer = null;
+      try { src.stop(); } catch (e) {}
+    }, 550);
+  } catch (e) {
+    // Silently ignore audio errors
+  }
+});
+
 window.electronAPI.onMiniModeChange((enabled, edge) => {
   miniLeftFlip = enabled && edge === "left";
   container.classList.toggle("mini-left", miniLeftFlip);
@@ -352,6 +424,145 @@ window.electronAPI.onEyeMove((dx, dy) => {
   }
   applyEyeMove(effectiveDx, dy);
 });
+
+// --- Confetti particle system (attention state celebration) ---
+const CONFETTI_COLORS = [
+  "#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#FF6FB5",
+  "#C490E4", "#FF9F45", "#72EFDD", "#F8F9FA", "#FFE66D",
+];
+const CONFETTI_COUNT = 40;
+const CONFETTI_DURATION = 2000;
+const CONFETTI_GRAVITY = 0.12;
+const CONFETTI_SHAPES = ["rect", "circle"];
+
+let confettiCanvas = null;
+let confettiAnimId = null;
+
+function spawnConfetti() {
+  // Clean up any running animation
+  if (confettiAnimId) { cancelAnimationFrame(confettiAnimId); confettiAnimId = null; }
+  if (confettiCanvas) { confettiCanvas.remove(); confettiCanvas = null; }
+
+  const canvas = document.createElement("canvas");
+  canvas.style.position = "absolute";
+  canvas.style.top = "0";
+  canvas.style.left = "0";
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.pointerEvents = "none";
+  canvas.style.zIndex = "9999";
+  canvas.width = container.offsetWidth || 256;
+  canvas.height = container.offsetHeight || 256;
+  container.appendChild(canvas);
+  confettiCanvas = canvas;
+
+  const ctx2d = canvas.getContext("2d");
+  const cx = canvas.width / 2;
+  const cy = canvas.height * 0.45;
+
+  // Create particles with random explosion vectors
+  const particles = [];
+  for (let i = 0; i < CONFETTI_COUNT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 5;
+    particles.push({
+      x: cx,
+      y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3,
+      color: CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)],
+      size: 2 + Math.random() * 4,
+      shape: CONFETTI_SHAPES[Math.floor(Math.random() * CONFETTI_SHAPES.length)],
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 0.3,
+      opacity: 1,
+    });
+  }
+
+  const startTime = performance.now();
+
+  function animate(now) {
+    const elapsed = now - startTime;
+    if (elapsed >= CONFETTI_DURATION) {
+      cancelAnimationFrame(confettiAnimId);
+      confettiAnimId = null;
+      canvas.remove();
+      confettiCanvas = null;
+      return;
+    }
+
+    const progress = elapsed / CONFETTI_DURATION;
+    ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (const p of particles) {
+      p.vy += CONFETTI_GRAVITY;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.99;
+      p.rotation += p.rotationSpeed;
+      // Fade out in the last 40% of duration
+      p.opacity = progress > 0.6 ? 1 - (progress - 0.6) / 0.4 : 1;
+
+      ctx2d.save();
+      ctx2d.translate(p.x, p.y);
+      ctx2d.rotate(p.rotation);
+      ctx2d.globalAlpha = Math.max(0, p.opacity);
+      ctx2d.fillStyle = p.color;
+
+      if (p.shape === "rect") {
+        ctx2d.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+      } else {
+        ctx2d.beginPath();
+        ctx2d.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+        ctx2d.fill();
+      }
+      ctx2d.restore();
+    }
+
+    confettiAnimId = requestAnimationFrame(animate);
+  }
+
+  confettiAnimId = requestAnimationFrame(animate);
+}
+
+window.electronAPI.onPlayConfetti(() => spawnConfetti());
+
+// --- Context-aware shake effect (high context usage) ---
+let shakeTimer = null;
+window.electronAPI.onContextShake((level) => {
+  if (shakeTimer) { clearTimeout(shakeTimer); shakeTimer = null; }
+  if (!container) return;
+  if (level === "CRITICAL") {
+    container.style.animation = "ctx-shake-hard 0.4s ease-in-out 3";
+  } else if (level === "WARNING") {
+    container.style.animation = "ctx-shake-soft 0.5s ease-in-out 2";
+  } else {
+    container.style.animation = "";
+    return;
+  }
+  shakeTimer = setTimeout(() => { container.style.animation = ""; shakeTimer = null; }, 2000);
+});
+
+// Inject shake keyframes into document
+(function injectShakeCSS() {
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes ctx-shake-soft {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-2px); }
+      75% { transform: translateX(2px); }
+    }
+    @keyframes ctx-shake-hard {
+      0%, 100% { transform: translateX(0); }
+      10% { transform: translateX(-3px) rotate(-1deg); }
+      30% { transform: translateX(3px) rotate(1deg); }
+      50% { transform: translateX(-3px) rotate(-1deg); }
+      70% { transform: translateX(3px) rotate(1deg); }
+      90% { transform: translateX(-2px); }
+    }
+  `;
+  document.head.appendChild(style);
+})();
 
 // --- Wake from doze (smooth eye opening) ---
 window.electronAPI.onWakeFromDoze(() => {

@@ -59,12 +59,14 @@ function savePrefs() {
     miniMode: _mini.getMiniMode(), miniEdge: _mini.getMiniEdge(), preMiniX: _mini.getPreMiniX(), preMiniY: _mini.getPreMiniY(), lang,
     showTray, showDock,
     autoStartWithClaude, bubbleFollowPet, hideBubbles, showSessionId,
-    telegramNotify, telegramChatId, soundEnabled,
+    telegramNotify, telegramChatId, soundEnabled, ambientEnabled, speechEnabled, chatEnabled,
   };
   try { fs.writeFileSync(PREFS_PATH, JSON.stringify(data)); } catch {}
 }
 
 let _codexMonitor = null;          // Codex CLI JSONL log polling instance
+let dashboardWin = null;           // Session Dashboard window (singleton)
+let _dashboardInterval = null;     // Auto-refresh timer for dashboard
 
 // ── CSS <object> sizing (mirrors styles.css #clawd) ──
 const OBJ_SCALE_W = 1.9;   // width: 190%
@@ -99,6 +101,9 @@ let petHidden = false;
 let telegramNotify = false;
 let telegramChatId = "";
 let soundEnabled = false;
+let ambientEnabled = false;
+let speechEnabled = true;
+let chatEnabled = true;
 const DEFAULT_TOGGLE_SHORTCUT = "CommandOrControl+Shift+Alt+C";
 
 function togglePetVisibility() {
@@ -127,6 +132,9 @@ function togglePetVisibility() {
     for (const perm of pendingPermissions) {
       if (perm.bubble && !perm.bubble.isDestroyed()) perm.bubble.hide();
     }
+    // Hide speech and chat bubbles
+    if (_speech) _speech.hide();
+    if (_chat) _chat.hide();
     petHidden = true;
   }
   buildTrayMenu();
@@ -314,6 +322,12 @@ const { startMainTick, resetIdleTimer } = _tick;
 const _focus = require("./focus")({ _allowSetForeground });
 const { initFocusHelper, killFocusHelper, focusTerminalWindow, clearMacFocusCooldownTimer } = _focus;
 
+// ── Activity tracker — delegated to src/activity.js ──
+const _activity = require("./activity")();
+
+// ── Active application detection — delegated to src/app-detect.js ──
+const _appDetect = require("./app-detect")();
+
 // ── HTTP server — delegated to src/server.js ──
 const _serverCtx = {
   get autoStartWithClaude() { return autoStartWithClaude; },
@@ -332,6 +346,16 @@ const _serverCtx = {
   getStats: (...args) => getStats(...args),
   setContextHealth: (...args) => setContextHealth(...args),
   notifyStateChange: (...args) => notifyStateChange(...args),
+  getActivity: () => _activity.getActivity(),
+  getAchievements: () => _achievements.getAll(),
+  getAchievementStats: () => _achievements.getStats(),
+  getKnowledge: () => _learner.getKnowledge(),
+  getHealthStatus: () => _healthWorker.getStatus(),
+  getFeatures: () => _featureWorker.getAllFeatures(),
+  getFeatureStats: () => _featureWorker.getStats(),
+  toggleFeature: (id, enabled) => _featureWorker.toggleFeature(id, enabled),
+  getActiveApp: () => _appDetect.getActiveApp(),
+  getPomodoroStatus: () => _pomodoro.getStatus(),
 };
 const _server = require("./server")(_serverCtx);
 const { startHttpServer, getHookServerPort, syncClawdHooks } = _server;
@@ -340,6 +364,8 @@ const { getStats, setContextHealth } = _state;
 // ── Sound effects — delegated to src/sounds.js ──
 const _soundsCtx = {
   get soundEnabled() { return soundEnabled; },
+  get ambientEnabled() { return ambientEnabled; },
+  get doNotDisturb() { return doNotDisturb; },
   sendToRenderer,
 };
 const _sounds = require("./sounds")(_soundsCtx);
@@ -353,8 +379,84 @@ const _notifyCtx = {
 const _notify = require("./notify")(_notifyCtx);
 const { onStateChange: notifyStateChange, notifyPermissionTimeout } = _notify;
 
-// Wire up state callbacks (must be after _sounds + _notify are loaded)
-_stateCtx.onApplyState = (state) => _sounds.playForState(state);
+// ── Achievements — delegated to src/achievements.js ──
+const { Notification: ElectronNotification } = require("electron");
+const _achievementsCtx = {
+  showNotification: (title, body) => {
+    try { new ElectronNotification({ title, body }).show(); } catch {}
+  },
+};
+const _achievements = require("./achievements")(_achievementsCtx);
+
+// ── Speech bubbles — delegated to src/speech.js ──
+const _speechCtx = {
+  get speechEnabled() { return speechEnabled; },
+  get doNotDisturb() { return doNotDisturb; },
+  get sessions() { return sessions; },
+  getWinBounds: () => (win && !win.isDestroyed()) ? win.getBounds() : null,
+  reapplyMacVisibility: (w) => { if (w) reapplyMacVisibility(); },
+  guardAlwaysOnTop: (w) => guardAlwaysOnTop(w),
+};
+const _speech = require("./speech")(_speechCtx);
+
+// ── Interactive chat bubbles — delegated to src/chat.js ──
+const _chatCtx = {
+  get chatEnabled() { return chatEnabled; },
+  get doNotDisturb() { return doNotDisturb; },
+  getWinBounds: () => (win && !win.isDestroyed()) ? win.getBounds() : null,
+  reapplyMacVisibility: (w) => { if (w) reapplyMacVisibility(); },
+  guardAlwaysOnTop: (w) => guardAlwaysOnTop(w),
+  focusTerminal: () => {
+    // Focus the most active session's terminal
+    let best = null, bestTime = 0;
+    for (const [, s] of sessions) {
+      if (!s.sourcePid) continue;
+      if (s.updatedAt > bestTime) { bestTime = s.updatedAt; best = s; }
+    }
+    if (best) focusTerminalWindow(best.sourcePid, best.cwd, best.editor, best.pidChain);
+  },
+  startPomodoro: () => _pomodoro.start(),
+  enableDND: () => enableDoNotDisturb(),
+};
+let _chat; // initialized after _pomodoro is available (see below)
+
+// ── Learner — delegated to src/learner.js ──
+const _learner = require("./learner")();
+
+// ── Autonomous Workers ──
+const _healthWorker = require("./workers/health-worker")({
+  getPort: () => getHookServerPort(),
+  sessions,
+  syncHooks: () => syncClawdHooks(),
+});
+const _featureWorker = require("./workers/feature-worker")({
+  getPrefs: (key) => { const m = { telegramNotify, soundEnabled, ambientEnabled, speechEnabled, chatEnabled }; return m[key]; },
+  setPrefs: (key, val) => {
+    if (key === "telegramNotify") telegramNotify = val;
+    else if (key === "soundEnabled") soundEnabled = val;
+    else if (key === "ambientEnabled") ambientEnabled = val;
+    else if (key === "speechEnabled") speechEnabled = val;
+    else if (key === "chatEnabled") chatEnabled = val;
+    savePrefs();
+  },
+});
+
+// Wire up state callbacks (must be after all feature modules are loaded)
+_stateCtx.onApplyState = (state) => {
+  _sounds.playForState(state);
+  _sounds.ambientForState(state);
+  _speech.showForState(state);
+  if (_chat) _chat.showForState(state);
+};
+_stateCtx.onTrackActivity = (event, state) => {
+  _activity.track(event, state);
+  _achievements.check(_activity.getActivity());
+  if (event === "SessionStart") _learner.analyzeDay(_activity.getActivity());
+  if (event === "PreToolUse") _learner.trackToolUse(event);
+  if (state === "error") _learner.trackError("runtime");
+  // Track session activity for long-session chat trigger
+  if (_chat) _chat.onSessionActivity(sessions.size);
+};
 
 // ── alwaysOnTop recovery (Windows DWM / Shell can strip TOPMOST flag) ──
 // The "always-on-top-changed" event only fires from Electron's own SetAlwaysOnTop
@@ -427,6 +529,44 @@ function updateLog(msg) {
   rotatedAppend(updateDebugLog, `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+// ── Session Dashboard ──
+function getDashboardData() {
+  const stats = getStats ? getStats() : {};
+  const activity = _activity.getActivity();
+  const achievements = _achievements.getStats();
+  const pomodoro = _pomodoro.getStatus();
+  const sessionList = [];
+  for (const [sid, s] of sessions) {
+    sessionList.push({ sessionId: sid, state: s.state, cwd: s.cwd || null, agentId: s.agentId || null, updatedAt: s.updatedAt || null, startedAt: s.startedAt || s.updatedAt || null });
+  }
+  return { sessionCount: sessions.size, sessions: sessionList, activity, achievements, pomodoro, uptime: Math.floor(process.uptime()), currentDisplay: stats.currentDisplay || null, dnd: doNotDisturb };
+}
+
+function sendDashboardUpdate() {
+  if (!dashboardWin || dashboardWin.isDestroyed()) return;
+  dashboardWin.webContents.send("dashboard-update", getDashboardData());
+}
+
+function showDashboard() {
+  if (dashboardWin && !dashboardWin.isDestroyed()) { dashboardWin.focus(); return; }
+  const dw = 320, dh = 400;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { x: waX, y: waY, width: waW, height: waH } = primaryDisplay.workArea;
+  dashboardWin = new BrowserWindow({
+    width: dw, height: dh, x: Math.round(waX + (waW - dw) / 2), y: Math.round(waY + (waH - dh) / 2),
+    frame: false, transparent: false, alwaysOnTop: true, resizable: false, skipTaskbar: false, backgroundColor: "#1e1e1e",
+    webPreferences: { preload: path.join(__dirname, "preload-dashboard.js"), nodeIntegration: false, contextIsolation: true },
+  });
+  dashboardWin.loadFile(path.join(__dirname, "dashboard.html"));
+  dashboardWin.webContents.once("did-finish-load", () => { sendDashboardUpdate(); });
+  _dashboardInterval = setInterval(sendDashboardUpdate, 2000);
+  dashboardWin.on("closed", () => { dashboardWin = null; if (_dashboardInterval) { clearInterval(_dashboardInterval); _dashboardInterval = null; } });
+}
+
+function closeDashboard() {
+  if (dashboardWin && !dashboardWin.isDestroyed()) dashboardWin.close();
+}
+
 // ── Menu — delegated to src/menu.js ──
 const _menuCtx = {
   get win() { return win; },
@@ -452,6 +592,16 @@ const _menuCtx = {
   set telegramNotify(v) { telegramNotify = v; },
   get soundEnabled() { return soundEnabled; },
   set soundEnabled(v) { soundEnabled = v; },
+  get ambientEnabled() { return ambientEnabled; },
+  set ambientEnabled(v) { ambientEnabled = v; },
+  get speechEnabled() { return speechEnabled; },
+  set speechEnabled(v) { speechEnabled = v; },
+  get chatEnabled() { return chatEnabled; },
+  set chatEnabled(v) { chatEnabled = v; },
+  onAmbientToggle: () => {
+    // Re-evaluate ambient state based on current display state
+    _sounds.ambientForState(_state.getCurrentState());
+  },
   get pendingPermissions() { return pendingPermissions; },
   repositionBubbles: () => repositionBubbles(),
   get petHidden() { return petHidden; },
@@ -482,11 +632,25 @@ const _menuCtx = {
   clampToScreen,
   getNearestWorkArea,
   reapplyMacVisibility,
+  pomodoroStart: () => _pomodoro.start(),
+  pomodoroStop: () => _pomodoro.stop(),
+  getPomodoroStatus: () => _pomodoro.getStatus(),
+  showDashboard: () => showDashboard(),
 };
 const _menu = require("./menu")(_menuCtx);
 const { t, buildContextMenu, buildTrayMenu, rebuildAllMenus, createTray,
         showPetContextMenu, popupMenuAt, ensureContextMenuOwner,
         requestAppQuit, resizeWindow, applyDockVisibility } = _menu;
+
+// ── Pomodoro timer ──
+const _pomodoro = require("./pomodoro")({
+  enableDND: () => enableDoNotDisturb(),
+  disableDND: () => disableDoNotDisturb(),
+  onPomodoroChange: () => rebuildAllMenus(),
+});
+
+// Now that _pomodoro exists, initialize _chat (declared above near speech module)
+_chat = require("./chat")(_chatCtx);
 
 // ── Auto-updater — delegated to src/updater.js ──
 const _updaterCtx = {
@@ -513,6 +677,9 @@ function createWindow() {
   if (prefs && typeof prefs.telegramNotify === "boolean") telegramNotify = prefs.telegramNotify;
   if (prefs && typeof prefs.telegramChatId === "string") telegramChatId = prefs.telegramChatId;
   if (prefs && typeof prefs.soundEnabled === "boolean") soundEnabled = prefs.soundEnabled;
+  if (prefs && typeof prefs.ambientEnabled === "boolean") ambientEnabled = prefs.ambientEnabled;
+  if (prefs && typeof prefs.speechEnabled === "boolean") speechEnabled = prefs.speechEnabled;
+  if (prefs && typeof prefs.chatEnabled === "boolean") chatEnabled = prefs.chatEnabled;
   // macOS: apply dock visibility (default hidden)
   if (isMac) {
     applyDockVisibility();
@@ -699,6 +866,135 @@ function createWindow() {
     }
   });
 
+  // ── Drag momentum physics ──
+  let _physicsTimer = null;
+
+  function stopPhysics() {
+    if (_physicsTimer) { clearInterval(_physicsTimer); _physicsTimer = null; }
+    dragLocked = false;
+    savePrefs();
+  }
+
+  ipcMain.on("drag-end-velocity", (event, vel) => {
+    if (!vel || _mini.getMiniMode() || _mini.getMiniTransitioning()) {
+      dragLocked = false;
+      return;
+    }
+
+    let vx = vel.vx || 0;
+    let vy = vel.vy || 0;
+
+    // Cap max velocity at 30 px/frame
+    const MAX_VEL = 30;
+    const speed = Math.sqrt(vx * vx + vy * vy);
+    if (speed > MAX_VEL) {
+      const scale = MAX_VEL / speed;
+      vx *= scale;
+      vy *= scale;
+    }
+
+    const FRICTION = 0.95;
+    const BOUNCE_LOSS = 0.6;
+    const MIN_VEL = 0.5;
+    const MAX_BOUNCES = 5;
+    let bounceCount = 0;
+    let frameCount = 0;
+
+    // Keep drag locked during physics
+    dragLocked = true;
+
+    // Stop any previous physics loop
+    if (_physicsTimer) { clearInterval(_physicsTimer); _physicsTimer = null; }
+
+    _physicsTimer = setInterval(() => {
+      if (!win || win.isDestroyed() || _mini.getMiniMode() || _mini.getMiniTransitioning()) {
+        stopPhysics();
+        return;
+      }
+
+      // Apply friction
+      vx *= FRICTION;
+      vy *= FRICTION;
+
+      // Check if velocity is below threshold
+      if (Math.abs(vx) < MIN_VEL && Math.abs(vy) < MIN_VEL) {
+        stopPhysics();
+        if (!_mini.getMiniMode() && !_mini.getMiniTransitioning()) {
+          checkMiniModeSnap();
+        }
+        return;
+      }
+
+      const { x, y } = win.getBounds();
+      const size = SIZES[currentSize];
+      let newX = x + Math.round(vx);
+      let newY = y + Math.round(vy);
+
+      // Get work area for edge detection
+      const wa = getNearestWorkArea(newX + size.width / 2, newY + size.height / 2);
+
+      // Compute visible bounds (same margins as clampToScreen)
+      const mLeft  = Math.round(size.width * 0.25);
+      const mRight = Math.round(size.width * 0.25);
+      const mTop   = Math.round(size.height * 0.6);
+      const mBot   = Math.round(size.height * 0.04);
+
+      const xMin = wa.x - mLeft;
+      const xMax = wa.x + wa.width - size.width + mRight;
+      const yMin = wa.y - mTop;
+      const yMax = wa.y + wa.height - size.height + mBot;
+
+      let bounced = false;
+
+      // Horizontal bounce
+      if (newX < xMin) {
+        newX = xMin;
+        vx = -vx * BOUNCE_LOSS;
+        bounced = true;
+      } else if (newX > xMax) {
+        newX = xMax;
+        vx = -vx * BOUNCE_LOSS;
+        bounced = true;
+      }
+
+      // Vertical bounce
+      if (newY < yMin) {
+        newY = yMin;
+        vy = -vy * BOUNCE_LOSS;
+        bounced = true;
+      } else if (newY > yMax) {
+        newY = yMax;
+        vy = -vy * BOUNCE_LOSS;
+        bounced = true;
+      }
+
+      if (bounced) {
+        bounceCount++;
+        if (bounceCount >= MAX_BOUNCES) {
+          // Clamp final position and stop
+          win.setBounds({ x: newX, y: newY, width: size.width, height: size.height });
+          syncHitWin();
+          stopPhysics();
+          return;
+        }
+      }
+
+      // Apply position
+      win.setBounds({ x: newX, y: newY, width: size.width, height: size.height });
+
+      // Throttle syncHitWin to every 2nd frame
+      frameCount++;
+      if (frameCount % 2 === 0) {
+        syncHitWin();
+      }
+
+      // Reposition bubbles if needed (throttled to every 3rd frame)
+      if (bubbleFollowPet && pendingPermissions.length && frameCount % 3 === 0) {
+        repositionBubbles();
+      }
+    }, 16);
+  });
+
   ipcMain.on("exit-mini-mode", () => {
     if (_mini.getMiniMode()) exitMiniMode();
   });
@@ -724,6 +1020,7 @@ function createWindow() {
 
   ipcMain.on("bubble-height", (event, height) => _perm.handleBubbleHeight(event, height));
   ipcMain.on("permission-decide", (event, behavior) => _perm.handleDecide(event, behavior));
+  ipcMain.on("dashboard-close", () => closeDashboard());
 
   initFocusHelper();
   startMainTick();
@@ -970,6 +1267,10 @@ if (!gotTheLock) {
       console.warn("Clawd: Codex log monitor not started:", err.message);
     }
 
+    // Start active-application detection (macOS only, 5s poll)
+    _appDetect.start();
+    _healthWorker.start();
+
     // Auto-install VS Code/Cursor terminal-focus extension
     try { installTerminalFocusExtension(); } catch (err) {
       console.warn("Clawd: failed to auto-install terminal-focus extension:", err.message);
@@ -986,14 +1287,19 @@ if (!gotTheLock) {
     unregisterToggleShortcut();
     globalShortcut.unregisterAll();
     _perm.cleanup();
+    _speech.cleanup();
+    if (_chat) _chat.cleanup();
     _server.cleanup();
     _state.cleanup();
     _tick.cleanup();
     _mini.cleanup();
     if (_codexMonitor) _codexMonitor.stop();
+    _appDetect.stop();
+    _healthWorker.stop();
     stopTopmostWatchdog();
     if (hwndRecoveryTimer) { clearTimeout(hwndRecoveryTimer); hwndRecoveryTimer = null; }
     _focus.cleanup();
+    closeDashboard();
     if (hitWin && !hitWin.isDestroyed()) hitWin.destroy();
   });
 
