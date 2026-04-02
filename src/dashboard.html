@@ -1,4 +1,4 @@
-<!-- dashboard.html v1.0.0 | lifecycle: active | 2026-04 -->
+<!-- dashboard.html v1.1.0 | lifecycle: active | 2026-04 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -49,6 +49,17 @@
     line-height: 1;
   }
   .titlebar-close:hover { background: #c44; color: #fff; }
+
+  .titlebar-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+    -webkit-app-region: no-drag;
+  }
+  .badge-dnd { background: #4a2d2d; color: #cf6f6f; }
+  .badge-ctx { background: #2d4a2d; color: #6fcf6f; }
 
   /* Content area */
   .content {
@@ -195,6 +206,23 @@
   .pomodoro-time { color: #888; font-size: 11px; }
 
   /* Uptime */
+  /* Insights */
+  .insight-item {
+    background: #252525;
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-bottom: 4px;
+    border: 1px solid #333;
+    font-size: 11px;
+    color: #ccc;
+  }
+  .insight-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
   .uptime-text {
     font-size: 10px;
     color: #555;
@@ -208,6 +236,8 @@
 
 <div class="titlebar">
   <span class="titlebar-text">Clawd Dashboard</span>
+  <span id="badge-dnd" class="titlebar-badge badge-dnd" style="display:none;">DND</span>
+  <span id="badge-ctx" class="titlebar-badge badge-ctx" style="display:none;">CTX 0%</span>
   <button class="titlebar-close" id="close-btn">&times;</button>
 </div>
 
@@ -239,6 +269,12 @@
       <div class="achievement-bar-fill" id="achievement-fill" style="width: 0%"></div>
     </div>
     <div class="achievement-text" id="achievement-text">0 / 0</div>
+  </div>
+
+  <!-- Insights -->
+  <div id="insights-section" style="display: none;">
+    <div class="section-header">Insights</div>
+    <div id="insights-list"></div>
   </div>
 
   <!-- Pomodoro -->
@@ -318,11 +354,60 @@
     el("stat-streak").textContent = (activity.streak || 0) + "d";
     el("stat-errors").textContent = activity.errors || 0;
 
+    // DND Badge
+    const dndBadge = el("badge-dnd");
+    if (data.dnd) {
+      dndBadge.style.display = "";
+    } else {
+      dndBadge.style.display = "none";
+    }
+
+    // Context Badge
+    const ctxBadge = el("badge-ctx");
+    const ctx = data.context || {};
+    if (ctx.percent != null) {
+      ctxBadge.style.display = "";
+      ctxBadge.textContent = "CTX " + ctx.percent + "%";
+      if (ctx.percent >= 75) {
+        ctxBadge.style.background = "#4a2d2d";
+        ctxBadge.style.color = "#cf6f6f";
+      } else if (ctx.percent >= 50) {
+        ctxBadge.style.background = "#4a4a2d";
+        ctxBadge.style.color = "#cfcf6f";
+      } else {
+        ctxBadge.style.background = "#2d4a2d";
+        ctxBadge.style.color = "#6fcf6f";
+      }
+    } else {
+      ctxBadge.style.display = "none";
+    }
+
     // Achievements
     const ach = data.achievements || {};
     const achPercent = ach.percent || 0;
     el("achievement-fill").style.width = achPercent + "%";
     el("achievement-text").textContent = (ach.unlocked || 0) + " / " + (ach.total || 0) + " (" + achPercent + "%)";
+
+    // Knowledge (in achievements bar label)
+    const know = data.knowledge || {};
+    if (know.total) {
+      el("achievement-text").textContent += " \u00B7 " + (know.total || 0) + " knowledge";
+    }
+
+    // Insights
+    const insightsSection = el("insights-section");
+    const insights = data.insights || [];
+    if (insights.length > 0) {
+      insightsSection.style.display = "";
+      el("insights-list").innerHTML = insights.slice(0, 5).map(i => {
+        return `<div class="insight-item">
+          <span class="insight-label">${escHtml(i.label || "")}</span>
+          ${escHtml(i.text || "")}
+        </div>`;
+      }).join("");
+    } else {
+      insightsSection.style.display = "none";
+    }
 
     // Pomodoro
     const pom = data.pomodoro || {};

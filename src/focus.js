@@ -262,7 +262,7 @@ function focusTerminalWindow(sourcePid, cwd, editor, pidChain) {
 function focusTerminalWindowLegacy(sourcePid, cwd, onDone, pidChain) {
   if (isMac) {
     const pidCandidates = [sourcePid];
-    if (Array.isArray(pidChain)) {
+    if (Array.isArray(pidChain) && pidChain.length <= 50) {
       for (const pid of pidChain) {
         if (!Number.isFinite(pid) || pid <= 0 || pidCandidates.includes(pid)) continue;
         pidCandidates.push(pid);

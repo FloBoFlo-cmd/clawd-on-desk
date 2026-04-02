@@ -1,5 +1,5 @@
-// src/server.js — HTTP server + routes (/state, /permission, /stats, /context)
-// Extracted from main.js L1337-1528
+// src/server.js v1.1.0 | lifecycle: active | 2026-04
+// HTTP server + routes (/state, /permission, /stats, /context, /clawd/*)
 
 const http = require("http");
 const fs = require("fs");
@@ -114,7 +114,7 @@ function watchSettingsForHookLoss() {
             lastSyncTime = Date.now();
             syncClawdHooks();
           }
-        } catch {}
+        } catch (err) { if (err.code !== "ENOENT") console.warn("Clawd: settings read failed:", err.message); }
       }, 1000);
     });
     settingsWatcher.on("error", (err) => {
@@ -255,8 +255,10 @@ function startHttpServer() {
       res.end(body);
     } else if (req.method === "POST" && req.url === "/context") {
       let body = "";
-      req.on("data", (chunk) => { body += chunk; });
+      let tooLarge = false;
+      req.on("data", (chunk) => { body += chunk; if (body.length > 65536) tooLarge = true; });
       req.on("end", () => {
+        if (tooLarge) { res.writeHead(413); res.end("payload too large"); return; }
         try {
           const data = JSON.parse(body);
           const percent = typeof data.percent === "number" ? data.percent : null;
@@ -343,6 +345,11 @@ function startHttpServer() {
             };
             permEntry.abortHandler = abortHandler;
             res.on("close", abortHandler);
+            if (ctx.pendingPermissions.length >= 20) {
+              ctx.permLog("queue full — auto-deny (elicitation)");
+              ctx.sendPermissionResponse(res, "deny", "Queue full");
+              return;
+            }
             ctx.pendingPermissions.push(permEntry);
             if (!ctx.hideBubbles) ctx.showPermissionBubble(permEntry);
             return;
@@ -357,6 +364,11 @@ function startHttpServer() {
           permEntry.abortHandler = abortHandler;
           res.on("close", abortHandler);
 
+          if (ctx.pendingPermissions.length >= 20) {
+            ctx.permLog("queue full — auto-deny");
+            ctx.sendPermissionResponse(res, "deny", "Queue full");
+            return;
+          }
           ctx.pendingPermissions.push(permEntry);
 
           if (ctx.hideBubbles) {
@@ -370,6 +382,96 @@ function startHttpServer() {
           res.end("bad json");
         }
       });
+    // ── Clawd Bridge Endpoints ──────────────────────────────────────
+    } else if (req.method === "GET" && req.url === "/clawd/status") {
+      const status = ctx.getClawdStatus ? ctx.getClawdStatus() : { error: "bridge not available" };
+      const body = JSON.stringify(status);
+      res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+      res.end(body);
+
+    } else if (req.method === "GET" && req.url === "/clawd/history") {
+      const history = ctx.getStateHistory ? ctx.getStateHistory() : [];
+      const body = JSON.stringify(history);
+      res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+      res.end(body);
+
+    } else if (req.method === "POST" && req.url === "/clawd/pomodoro") {
+      let body = "";
+      let tooLarge = false;
+      req.on("data", (chunk) => { body += chunk; if (body.length > 65536) tooLarge = true; });
+      req.on("end", () => {
+        if (tooLarge) { res.writeHead(413); res.end("payload too large"); return; }
+        try {
+          const data = JSON.parse(body);
+          const action = data.action; // "start" or "stop"
+          if (action === "start" && ctx.pomodoroStart) {
+            ctx.pomodoroStart(data.minutes || 25);
+            res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+            res.end(JSON.stringify({ ok: true, action: "start" }));
+          } else if (action === "stop" && ctx.pomodoroStop) {
+            ctx.pomodoroStop();
+            res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+            res.end(JSON.stringify({ ok: true, action: "stop" }));
+          } else {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: "action must be 'start' or 'stop'" }));
+          }
+        } catch {
+          res.writeHead(400);
+          res.end("bad json");
+        }
+      });
+
+    } else if (req.method === "POST" && req.url === "/clawd/dnd") {
+      let body = "";
+      let tooLarge = false;
+      req.on("data", (chunk) => { body += chunk; if (body.length > 65536) tooLarge = true; });
+      req.on("end", () => {
+        if (tooLarge) { res.writeHead(413); res.end("payload too large"); return; }
+        try {
+          const data = JSON.parse(body);
+          const enabled = data.enabled === true;
+          if (enabled ? ctx.enableDoNotDisturb : ctx.disableDoNotDisturb) {
+            if (enabled) ctx.enableDoNotDisturb(); else ctx.disableDoNotDisturb();
+            res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+            res.end(JSON.stringify({ ok: true, dnd: enabled }));
+          } else {
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: "dnd not available" }));
+          }
+        } catch {
+          res.writeHead(400);
+          res.end("bad json");
+        }
+      });
+
+    } else if (req.method === "POST" && req.url === "/clawd/speech") {
+      let body = "";
+      let tooLarge = false;
+      req.on("data", (chunk) => { body += chunk; if (body.length > 65536) tooLarge = true; });
+      req.on("end", () => {
+        if (tooLarge) { res.writeHead(413); res.end("payload too large"); return; }
+        try {
+          const data = JSON.parse(body);
+          const text = typeof data.text === "string" ? data.text.slice(0, 500) : "";
+          const duration = Math.max(500, Math.min(30000, typeof data.duration === "number" ? data.duration : 5000));
+          if (text && ctx.showSpeechBubble) {
+            ctx.showSpeechBubble(text, duration);
+            res.writeHead(200, { "Content-Type": "application/json", [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+            res.end(JSON.stringify({ ok: true }));
+          } else if (!text) {
+            res.writeHead(400);
+            res.end(JSON.stringify({ error: "text required" }));
+          } else {
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: "speech not available" }));
+          }
+        } catch {
+          res.writeHead(400);
+          res.end("bad json");
+        }
+      });
+
     } else {
       res.writeHead(404);
       res.end();

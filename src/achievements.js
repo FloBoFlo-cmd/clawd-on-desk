@@ -1,4 +1,4 @@
-// achievements.js v1.0.0 | lifecycle: active | 2026-04
+// achievements.js v1.1.0 | lifecycle: active | 2026-04
 // Achievement/unlock system for Clawd on Desk.
 // Checks milestones against activity data, persists unlocked achievements,
 // triggers Electron notifications on first unlock.
@@ -64,6 +64,9 @@ module.exports = function initAchievements(ctx) {
       for (const def of newlyUnlocked) {
         if (ctx.showNotification) {
           ctx.showNotification(`Achievement: ${def.name}`, def.desc);
+        }
+        if (ctx.showSpeechBubble) {
+          ctx.showSpeechBubble(`Achievement: ${def.name}!`, 5000);
         }
       }
     }

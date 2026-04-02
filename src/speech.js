@@ -1,4 +1,4 @@
-// speech.js v1.0.0 | lifecycle: active | 2026-04
+// speech.js v1.1.0 | lifecycle: active | 2026-04
 "use strict";
 
 const { BrowserWindow } = require("electron");
@@ -35,7 +35,7 @@ module.exports = function initSpeech(ctx) {
   let hideTimer = null;
   let lastFirstOnlyState = null;
 
-  function show(text) {
+  function show(text, duration) {
     if (!ctx.speechEnabled || ctx.doNotDisturb) return;
     hide(); // close existing
 
@@ -107,7 +107,7 @@ body{display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px
 
     if (ctx.guardAlwaysOnTop) ctx.guardAlwaysOnTop(bubble);
 
-    hideTimer = setTimeout(() => hide(), BUBBLE_DURATION);
+    hideTimer = setTimeout(() => hide(), duration || BUBBLE_DURATION);
   }
 
   function showForState(state, sessionId) {
@@ -149,12 +149,17 @@ body{display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px
     }
     const folder = session && session.cwd ? path.basename(session.cwd) : "";
 
+    const duration = session && session.startedAt ? Math.round((Date.now() - session.startedAt) / 60000) : 0;
+    const agent = session && session.agentId ? session.agentId.replace("claude-code", "Claude") : "";
+    const durStr = duration > 0 ? `, ${duration}min` : "";
+    const agentStr = agent ? ` (${agent}${durStr})` : (durStr ? ` (${durStr.slice(2)})` : "");
+
     let text = STATE_MESSAGES[state];
     if (!text) return;
 
     if (state === "working" && folder) text = `Arbeite an ${folder}...`;
     if (state === "error" && folder) text = `Fehler in ${folder}!`;
-    if (state === "attention" && folder) text = `${folder} fertig!`;
+    if (state === "attention" && folder) text = `${folder} fertig!${agentStr}`;
 
     show(text);
   }
@@ -170,9 +175,20 @@ body{display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px
     bubble = null;
   }
 
+  let tipShownToday = null;
+  function showTip(learner) {
+    if (!ctx.speechEnabled || ctx.doNotDisturb) return;
+    const today = new Date().toISOString().split("T")[0];
+    if (tipShownToday === today) return;
+    const tip = learner.getTipOfTheDay();
+    if (!tip || !tip.text) return;
+    tipShownToday = today;
+    show(tip.text, 5000);
+  }
+
   function cleanup() {
     hide();
   }
 
-  return { show, showForState, hide, cleanup };
+  return { show, showForState, showTip, hide, cleanup };
 };

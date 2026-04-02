@@ -1,3 +1,4 @@
+// main.js v0.6.0 | lifecycle: active | 2026-04
 const { app, BrowserWindow, screen, Menu, ipcMain, globalShortcut } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -61,7 +62,7 @@ function savePrefs() {
     autoStartWithClaude, bubbleFollowPet, hideBubbles, showSessionId,
     telegramNotify, telegramChatId, soundEnabled, ambientEnabled, speechEnabled, chatEnabled,
   };
-  try { fs.writeFileSync(PREFS_PATH, JSON.stringify(data)); } catch {}
+  try { fs.writeFileSync(PREFS_PATH, JSON.stringify(data)); } catch (err) { console.warn("Clawd: failed to save prefs:", err.message); }
 }
 
 let _codexMonitor = null;          // Codex CLI JSONL log polling instance
@@ -344,7 +345,7 @@ const _serverCtx = {
   showPermissionBubble,
   permLog,
   getStats: (...args) => getStats(...args),
-  setContextHealth: (...args) => setContextHealth(...args),
+  setContextHealth: (...args) => { setContextHealth(...args); checkContextBubble(); },
   notifyStateChange: (...args) => notifyStateChange(...args),
   getActivity: () => _activity.getActivity(),
   getAchievements: () => _achievements.getAll(),
@@ -356,6 +357,13 @@ const _serverCtx = {
   toggleFeature: (id, enabled) => _featureWorker.toggleFeature(id, enabled),
   getActiveApp: () => _appDetect.getActiveApp(),
   getPomodoroStatus: () => _pomodoro.getStatus(),
+  getClawdStatus: () => _notify.getCurrentStatus(),
+  getStateHistory: () => _notify.getStateHistory(),
+  pomodoroStart: () => _pomodoro.start(),
+  pomodoroStop: () => _pomodoro.stop(),
+  enableDoNotDisturb: () => enableDoNotDisturb(),
+  disableDoNotDisturb: () => disableDoNotDisturb(),
+  showSpeechBubble: (text, dur) => _speech.show(text, dur),
 };
 const _server = require("./server")(_serverCtx);
 const { startHttpServer, getHookServerPort, syncClawdHooks } = _server;
@@ -370,13 +378,13 @@ const _soundsCtx = {
 };
 const _sounds = require("./sounds")(_soundsCtx);
 
-// ── Telegram notifications — delegated to src/notify.js ──
+// ── Telegram notifications — delegated to src/telegram-bridge.js ──
 const _notifyCtx = {
   get telegramNotify() { return telegramNotify; },
   get telegramChatId() { return telegramChatId; },
   get sessions() { return sessions; },
 };
-const _notify = require("./notify")(_notifyCtx);
+const _notify = require("./telegram-bridge")(_notifyCtx);
 const { onStateChange: notifyStateChange, notifyPermissionTimeout } = _notify;
 
 // ── Achievements — delegated to src/achievements.js ──
@@ -385,6 +393,7 @@ const _achievementsCtx = {
   showNotification: (title, body) => {
     try { new ElectronNotification({ title, body }).show(); } catch {}
   },
+  showSpeechBubble: (text, duration) => _speech.show(text, duration),
 };
 const _achievements = require("./achievements")(_achievementsCtx);
 
@@ -447,6 +456,9 @@ _stateCtx.onApplyState = (state) => {
   _sounds.ambientForState(state);
   _speech.showForState(state);
   if (_chat) _chat.showForState(state);
+  if (state === "working" || state === "thinking") {
+    _speech.showTip(_learner);
+  }
 };
 _stateCtx.onTrackActivity = (event, state) => {
   _activity.track(event, state);
@@ -529,17 +541,32 @@ function updateLog(msg) {
   rotatedAppend(updateDebugLog, `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+// ── Context-Health speech bubble warning ──
+let contextWarnedLevel = null;
+function checkContextBubble() {
+  const ch = getStats ? getStats().contextHealth : null;
+  if (!ch || ch.percent === null) return;
+  if (ch.percent >= 80 && contextWarnedLevel !== 80) {
+    contextWarnedLevel = 80;
+    _speech.show("Kontext kritisch: " + ch.percent + "%! Bald /compact?", 5000);
+  } else if (ch.percent >= 65 && contextWarnedLevel === null) {
+    contextWarnedLevel = 65;
+    _speech.show("Kontext bei " + ch.percent + "% — /compact bald empfohlen", 4000);
+  }
+}
+
 // ── Session Dashboard ──
 function getDashboardData() {
   const stats = getStats ? getStats() : {};
   const activity = _activity.getActivity();
   const achievements = _achievements.getStats();
+  const knowledge = _learner.getKnowledge();
   const pomodoro = _pomodoro.getStatus();
   const sessionList = [];
   for (const [sid, s] of sessions) {
     sessionList.push({ sessionId: sid, state: s.state, cwd: s.cwd || null, agentId: s.agentId || null, updatedAt: s.updatedAt || null, startedAt: s.startedAt || s.updatedAt || null });
   }
-  return { sessionCount: sessions.size, sessions: sessionList, activity, achievements, pomodoro, uptime: Math.floor(process.uptime()), currentDisplay: stats.currentDisplay || null, dnd: doNotDisturb };
+  return { sessionCount: sessions.size, sessions: sessionList, activity, achievements, knowledge, pomodoro, uptime: Math.floor(process.uptime()), currentDisplay: stats.currentDisplay || null, dnd: doNotDisturb };
 }
 
 function sendDashboardUpdate() {
