@@ -97,6 +97,8 @@ const i18n = {
     sessionJustNow: "just now",
     sessionMinAgo: "{n}m ago",
     sessionHrAgo: "{n}h ago",
+    telegramNotify: "Telegram Notifications",
+    soundEffects: "Sound Effects",
     showPet: "Show Clawd",
     hidePet: "Hide Clawd",
     toggleShortcut: "Toggle Shortcut: {shortcut}",
@@ -145,6 +147,8 @@ const i18n = {
     sessionJustNow: "刚刚",
     sessionMinAgo: "{n}分钟前",
     sessionHrAgo: "{n}小时前",
+    telegramNotify: "Telegram 通知",
+    soundEffects: "音效",
     showPet: "显示 Clawd",
     hidePet: "隐藏 Clawd",
     toggleShortcut: "切换快捷键: {shortcut}",
@@ -252,6 +256,29 @@ module.exports = function initMenu(ctx) {
         checked: ctx.showSessionId,
         click: (menuItem) => {
           ctx.showSessionId = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      { type: "separator" },
+      {
+        label: t("telegramNotify"),
+        type: "checkbox",
+        checked: ctx.telegramNotify,
+        click: (menuItem) => {
+          ctx.telegramNotify = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("soundEffects"),
+        type: "checkbox",
+        checked: ctx.soundEnabled,
+        click: (menuItem) => {
+          ctx.soundEnabled = menuItem.checked;
           buildContextMenu();
           buildTrayMenu();
           ctx.savePrefs();
@@ -445,6 +472,28 @@ module.exports = function initMenu(ctx) {
         checked: ctx.hideBubbles,
         click: (menuItem) => {
           ctx.hideBubbles = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("telegramNotify"),
+        type: "checkbox",
+        checked: ctx.telegramNotify,
+        click: (menuItem) => {
+          ctx.telegramNotify = menuItem.checked;
+          buildContextMenu();
+          buildTrayMenu();
+          ctx.savePrefs();
+        },
+      },
+      {
+        label: t("soundEffects"),
+        type: "checkbox",
+        checked: ctx.soundEnabled,
+        click: (menuItem) => {
+          ctx.soundEnabled = menuItem.checked;
           buildContextMenu();
           buildTrayMenu();
           ctx.savePrefs();

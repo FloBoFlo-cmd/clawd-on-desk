@@ -119,6 +119,32 @@ let lastWakeCursorX = null, lastWakeCursorY = null;
 let staleCleanupTimer = null;
 let _detectInFlight = false;
 
+// ── Context health (populated via POST /context) ──
+let contextHealth = { percent: null, level: null, updatedAt: null };
+
+function setContextHealth(percent, level) {
+  contextHealth = { percent, level, updatedAt: Date.now() };
+}
+
+function getStats() {
+  const stateCount = {};
+  let oldest = Infinity;
+  for (const [, s] of sessions) {
+    stateCount[s.state] = (stateCount[s.state] || 0) + 1;
+    if (s.updatedAt < oldest) oldest = s.updatedAt;
+  }
+  return {
+    sessions: sessions.size,
+    states: stateCount,
+    currentDisplay: currentState,
+    currentSvg: currentSvg,
+    uptime: Math.floor(process.uptime()),
+    dnd: ctx.doNotDisturb,
+    miniMode: ctx.miniMode,
+    contextHealth: contextHealth.percent !== null ? contextHealth : null,
+  };
+}
+
 // ── Session Dashboard constants ──
 const STATE_EMOJI = {
   working: "\u{1F528}", thinking: "\u{1F914}", juggling: "\u{1F939}",
@@ -217,6 +243,7 @@ function applyState(state, svgOverride) {
   }
 
   ctx.sendToRenderer("state-change", state, svg);
+  if (ctx.onApplyState) ctx.onApplyState(state);
   ctx.syncHitWin();
   ctx.sendToHitWin("hit-state-sync", { currentSvg: svg });
   ctx.sendToHitWin("hit-cancel-reaction");
@@ -690,6 +717,7 @@ return {
   getSvgOverride, cleanStaleSessions, startStartupRecovery,
   detectRunningAgentProcesses, buildSessionSubmenu,
   getCurrentState, getCurrentSvg, getCurrentHitBox, getStartupRecoveryActive,
+  getStats, setContextHealth,
   sessions, STATE_SVGS, STATE_PRIORITY, ONESHOT_STATES, SLEEP_SEQUENCE,
   HIT_BOXES, WIDE_SVGS,
   cleanup,

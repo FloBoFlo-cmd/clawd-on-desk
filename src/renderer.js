@@ -15,6 +15,29 @@ let miniLeftFlip = false;
 
 window.electronAPI.onDndChange((enabled) => { dndEnabled = enabled; });
 
+// --- Sound effects (Web Audio API synthesis) ---
+let audioCtx = null;
+window.electronAPI.onPlaySound((sound) => {
+  try {
+    if (!audioCtx) audioCtx = new AudioContext();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = sound.type || "sine";
+    osc.frequency.setValueAtTime(sound.freq, audioCtx.currentTime);
+    if (sound.freq2) {
+      osc.frequency.linearRampToValueAtTime(sound.freq2, audioCtx.currentTime + (sound.duration || 0.2));
+    }
+    gain.gain.setValueAtTime(sound.volume || 0.25, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (sound.duration || 0.2));
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + (sound.duration || 0.2) + 0.05);
+  } catch (e) {
+    // Silently ignore audio errors (e.g. autoplay policy)
+  }
+});
+
 window.electronAPI.onMiniModeChange((enabled, edge) => {
   miniLeftFlip = enabled && edge === "left";
   container.classList.toggle("mini-left", miniLeftFlip);

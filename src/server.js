@@ -1,4 +1,4 @@
-// src/server.js — HTTP server + routes (/state, /permission, /health)
+// src/server.js — HTTP server + routes (/state, /permission, /stats, /context)
 // Extracted from main.js L1337-1528
 
 const http = require("http");
@@ -181,12 +181,38 @@ function startHttpServer() {
             } else {
               ctx.updateSession(sid, state, event, source_pid, cwd, editor, pidChain, agentPid, agentId, host, headless, display_svg);
             }
+            // Telegram notification for important states
+            if (ctx.notifyStateChange) ctx.notifyStateChange(state, sid);
             res.writeHead(200, { [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
             res.end("ok");
           } else {
             res.writeHead(400);
             res.end("unknown state");
           }
+        } catch {
+          res.writeHead(400);
+          res.end("bad json");
+        }
+      });
+    } else if (req.method === "GET" && req.url === "/stats") {
+      const stats = ctx.getStats ? ctx.getStats() : { error: "stats not available" };
+      const body = JSON.stringify(stats);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID,
+      });
+      res.end(body);
+    } else if (req.method === "POST" && req.url === "/context") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          const percent = typeof data.percent === "number" ? data.percent : null;
+          const level = typeof data.level === "string" ? data.level : null;
+          if (ctx.setContextHealth) ctx.setContextHealth(percent, level);
+          res.writeHead(200, { [CLAWD_SERVER_HEADER]: CLAWD_SERVER_ID });
+          res.end("ok");
         } catch {
           res.writeHead(400);
           res.end("bad json");

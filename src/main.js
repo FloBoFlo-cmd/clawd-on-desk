@@ -59,6 +59,7 @@ function savePrefs() {
     miniMode: _mini.getMiniMode(), miniEdge: _mini.getMiniEdge(), preMiniX: _mini.getPreMiniX(), preMiniY: _mini.getPreMiniY(), lang,
     showTray, showDock,
     autoStartWithClaude, bubbleFollowPet, hideBubbles, showSessionId,
+    telegramNotify, telegramChatId, soundEnabled,
   };
   try { fs.writeFileSync(PREFS_PATH, JSON.stringify(data)); } catch {}
 }
@@ -95,6 +96,9 @@ let bubbleFollowPet = false;
 let hideBubbles = false;
 let showSessionId = false;
 let petHidden = false;
+let telegramNotify = false;
+let telegramChatId = "";
+let soundEnabled = false;
 const DEFAULT_TOGGLE_SHORTCUT = "CommandOrControl+Shift+Alt+C";
 
 function togglePetVisibility() {
@@ -325,9 +329,32 @@ const _serverCtx = {
   sendPermissionResponse,
   showPermissionBubble,
   permLog,
+  getStats: (...args) => getStats(...args),
+  setContextHealth: (...args) => setContextHealth(...args),
+  notifyStateChange: (...args) => notifyStateChange(...args),
 };
 const _server = require("./server")(_serverCtx);
 const { startHttpServer, getHookServerPort, syncClawdHooks } = _server;
+const { getStats, setContextHealth } = _state;
+
+// ── Sound effects — delegated to src/sounds.js ──
+const _soundsCtx = {
+  get soundEnabled() { return soundEnabled; },
+  sendToRenderer,
+};
+const _sounds = require("./sounds")(_soundsCtx);
+
+// ── Telegram notifications — delegated to src/notify.js ──
+const _notifyCtx = {
+  get telegramNotify() { return telegramNotify; },
+  get telegramChatId() { return telegramChatId; },
+  get sessions() { return sessions; },
+};
+const _notify = require("./notify")(_notifyCtx);
+const { onStateChange: notifyStateChange, notifyPermissionTimeout } = _notify;
+
+// Wire up state callbacks (must be after _sounds + _notify are loaded)
+_stateCtx.onApplyState = (state) => _sounds.playForState(state);
 
 // ── alwaysOnTop recovery (Windows DWM / Shell can strip TOPMOST flag) ──
 // The "always-on-top-changed" event only fires from Electron's own SetAlwaysOnTop
@@ -421,6 +448,10 @@ const _menuCtx = {
   set hideBubbles(v) { hideBubbles = v; },
   get showSessionId() { return showSessionId; },
   set showSessionId(v) { showSessionId = v; },
+  get telegramNotify() { return telegramNotify; },
+  set telegramNotify(v) { telegramNotify = v; },
+  get soundEnabled() { return soundEnabled; },
+  set soundEnabled(v) { soundEnabled = v; },
   get pendingPermissions() { return pendingPermissions; },
   repositionBubbles: () => repositionBubbles(),
   get petHidden() { return petHidden; },
@@ -479,6 +510,9 @@ function createWindow() {
   if (prefs && typeof prefs.bubbleFollowPet === "boolean") bubbleFollowPet = prefs.bubbleFollowPet;
   if (prefs && typeof prefs.hideBubbles === "boolean") hideBubbles = prefs.hideBubbles;
   if (prefs && typeof prefs.showSessionId === "boolean") showSessionId = prefs.showSessionId;
+  if (prefs && typeof prefs.telegramNotify === "boolean") telegramNotify = prefs.telegramNotify;
+  if (prefs && typeof prefs.telegramChatId === "string") telegramChatId = prefs.telegramChatId;
+  if (prefs && typeof prefs.soundEnabled === "boolean") soundEnabled = prefs.soundEnabled;
   // macOS: apply dock visibility (default hidden)
   if (isMac) {
     applyDockVisibility();
